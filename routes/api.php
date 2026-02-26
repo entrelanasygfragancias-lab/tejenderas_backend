@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\HomeCarouselController;
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/products', [ProductController::class, 'index']); // Public catalog
+Route::get('/categories-public', [App\Http\Controllers\Api\CategoryController::class, 'index']); // Public categories for filters
 Route::get('/home-carousel', [HomeCarouselController::class, 'show']);
 
 // Protected routes
@@ -39,6 +40,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/products/generate-barcode', [ProductController::class, 'generate']);
         Route::get('/products/check/{barcode}', [ProductController::class, 'check']);
         Route::apiResource('products', ProductController::class);
+        Route::post('/products/{product}/stock-in', [ProductController::class, 'addStock']);
+
+        // Categories & Subcategories
+        Route::apiResource('categories', App\Http\Controllers\Api\CategoryController::class);
+        Route::post('/categories/{category}/subcategories', [App\Http\Controllers\Api\CategoryController::class, 'storeSubcategory']);
+        Route::put('/categories/{category}/subcategories/{subcategory}', [App\Http\Controllers\Api\CategoryController::class, 'updateSubcategory']);
+        Route::delete('/categories/{category}/subcategories/{subcategory}', [App\Http\Controllers\Api\CategoryController::class, 'destroySubcategory']);
+
+        // Attributes
+        Route::apiResource('attributes', App\Http\Controllers\Api\AttributeController::class);
+        Route::post('/attributes/{attribute}/values', [App\Http\Controllers\Api\AttributeController::class, 'storeValue']);
+        Route::put('/attributes/{attribute}/values/{value}', [App\Http\Controllers\Api\AttributeController::class, 'updateValue']);
+        Route::delete('/attributes/{attribute}/values/{value}', [App\Http\Controllers\Api\AttributeController::class, 'destroyValue']);
+
         Route::post('/sales/lookup', [App\Http\Controllers\Api\SaleController::class, 'lookupBarcode']);
         Route::apiResource('sales', App\Http\Controllers\Api\SaleController::class);
         Route::get('/orders', [App\Http\Controllers\Api\OrderController::class, 'indexAdmin']);

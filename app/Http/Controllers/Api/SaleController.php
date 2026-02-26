@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Models\StockMovement;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -15,16 +16,39 @@ class SaleController extends Controller
      */
     public function index(Request $request)
     {
-        // 1. POS Sales
+        $data = $this->getTransactionsData($request);
+        $stats = $this->calculateStats($data['sales'], $data['orders'], $data['payments']);
+
+        // Merge and Sort
+        $allTransactions = $data['sales']
+            ->concat($data['orders'])
+            ->concat($data['payments'])
+            ->sortByDesc('created_at')
+            ->values();
+
+        // Pagination
+        $page = $request->input('page', 1);
+        $perPage = 20;
+        $paginatedItems = new \Illuminate\Pagination\LengthAwarePaginator(
+            $allTransactions->forPage($page, $perPage)->values(),
+            $allTransactions->count(),
+            $perPage,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()]
+        );
+
+        return response()->json([
+            'stats' => $stats,
+            'sales' => $paginatedItems
+        ]);
+    }
+
+    private function getTransactionsData(Request $request)
+    {
         $salesQuery = Sale::with(['user', 'items.product']);
-        
-        // 2. Orders (Only completed)
         $ordersQuery = \App\Models\Order::with('user', 'items')->where('status', 'completed');
-        
-        // 3. Contract Payments
         $paymentsQuery = \App\Models\ContractPayment::with('contract');
 
-        // Apply Date Filters
         if ($request->period === 'daily') {
             $today = now()->today();
             $salesQuery->whereDate('created_at', $today);
@@ -42,54 +66,65 @@ class SaleController extends Controller
             $paymentsQuery->whereBetween('payment_date', $range);
         }
 
-        // Fetch Data
-        $sales = $salesQuery->orderBy('created_at', 'desc')->get();
-        $orders = $ordersQuery->orderBy('created_at', 'desc')->get();
-        $payments = $paymentsQuery->orderBy('payment_date', 'desc')->get();
+        return [
+            'sales' => $salesQuery->orderBy('created_at', 'desc')->get(),
+            'orders' => $ordersQuery->orderBy('created_at', 'desc')->get(),
+            'payments' => $paymentsQuery->orderBy('payment_date', 'desc')->get(),
+        ];
+    }
 
-        // Calculate Stats
+    private function calculateStats($sales, $orders, $payments)
+    {
         $posTotal = (float) $sales->sum('total');
         $ordersTotal = (float) $orders->sum('total');
         $contractsTotal = (float) $payments->sum('amount');
-        $totalSales = $posTotal + $ordersTotal + $contractsTotal;
-
+        
         $telasTotal = 0;
         $perfumeriaTotal = 0;
+        $perfumeriaCatalogoTotal = 0;
+        $perfumeriaDisenadorTotal = 0;
 
-        // Transform POS Sales & Calc Category Stats
-        $sales->transform(function ($sale) use (&$telasTotal, &$perfumeriaTotal) {
+        $sales->transform(function ($sale) use (&$telasTotal, &$perfumeriaTotal, &$perfumeriaCatalogoTotal, &$perfumeriaDisenadorTotal) {
             $sale->type = 'pos';
             $saleTelas = 0;
             $salePerfumeria = 0;
+            $salePerfumeriaCatalogo = 0;
+            $salePerfumeriaDisenador = 0;
             
             foreach ($sale->items as $item) {
                 if ($item->product && $item->product->category === 'perfumeria') {
                     $salePerfumeria += $item->subtotal;
+                    if ($item->product->subcategory === 'catalogo') {
+                        $salePerfumeriaCatalogo += $item->subtotal;
+                    } elseif ($item->product->subcategory === 'disenador') {
+                        $salePerfumeriaDisenador += $item->subtotal;
+                    }
                 } else {
                     $saleTelas += $item->subtotal;
                 }
             }
             $telasTotal += $saleTelas;
             $perfumeriaTotal += $salePerfumeria;
+            $perfumeriaCatalogoTotal += $salePerfumeriaCatalogo;
+            $perfumeriaDisenadorTotal += $salePerfumeriaDisenador;
 
             $sale->telas_total = $saleTelas;
             $sale->perfumeria_total = $salePerfumeria;
+            $sale->perfumeria_catalogo_total = $salePerfumeriaCatalogo;
+            $sale->perfumeria_disenador_total = $salePerfumeriaDisenador;
             return $sale;
         });
 
-        // Transform Orders
         $orders->transform(function($order) {
             $order->type = 'order';
             $order->payment_method = 'web'; 
             return $order;
         });
 
-        // Transform Payments
         $payments->transform(function($payment) {
             $payment->type = 'contract_payment';
             $payment->created_at = $payment->payment_date;
-            $payment->total = $payment->amount; // Normalize amount to total
-            // Create a mock user object for display consistency
+            $payment->total = $payment->amount;
             $payment->user = [
                 'name' => $payment->contract ? ($payment->contract->company_name . ' (' . $payment->contract->contact_person . ')') : 'Contrato Eliminado'
             ];
@@ -97,31 +132,16 @@ class SaleController extends Controller
             return $payment;
         });
 
-        // Merge and Sort
-        $allTransactions = $sales->concat($orders)->concat($payments)->sortByDesc('created_at')->values();
-
-        // Pagination
-        $page = $request->input('page', 1);
-        $perPage = 20;
-        $paginatedItems = new \Illuminate\Pagination\LengthAwarePaginator(
-            $allTransactions->forPage($page, $perPage)->values(),
-            $allTransactions->count(),
-            $perPage,
-            $page,
-            ['path' => $request->url(), 'query' => $request->query()]
-        );
-
-        return response()->json([
-            'stats' => [
-                'total' => $totalSales,
-                'pos_total' => $posTotal,
-                'orders_total' => $ordersTotal,
-                'contracts_total' => $contractsTotal,
-                'telas' => $telasTotal,
-                'perfumeria' => $perfumeriaTotal
-            ],
-            'sales' => $paginatedItems
-        ]);
+        return [
+            'total' => $posTotal + $ordersTotal + $contractsTotal,
+            'pos_total' => $posTotal,
+            'orders_total' => $ordersTotal,
+            'contracts_total' => $contractsTotal,
+            'telas' => $telasTotal,
+            'perfumeria' => $perfumeriaTotal,
+            'perfumeria_catalogo' => $perfumeriaCatalogoTotal,
+            'perfumeria_disenador' => $perfumeriaDisenadorTotal
+        ];
     }
 
     /**
@@ -131,22 +151,18 @@ class SaleController extends Controller
     {
         $request->validate(['barcode' => 'required|string']);
 
-        $product = Product::where('barcode', $request->barcode)->first();
+        $products = Product::with(['attributes', 'attributeValues' => function($q) {
+            $q->withPivot(['price_delta', 'base_price', 'markup', 'markup_type', 'stock', 'image']);
+        }])->where('barcode', $request->barcode)->get();
 
-        if (!$product) {
+        if ($products->isEmpty()) {
             return response()->json([
                 'message' => 'Producto no encontrado'
             ], 404);
         }
 
-        if ($product->stock <= 0) {
-            return response()->json([
-                'message' => 'Producto sin stock disponible',
-                'product' => $product
-            ], 400);
-        }
-
-        return response()->json($product);
+        // We return all matches, the frontend will decide if it shows a list or picks one
+        return response()->json($products);
     }
 
     /**
@@ -158,6 +174,7 @@ class SaleController extends Controller
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.quantity' => 'required|integer|min:1',
+            'items.*.variants' => 'nullable',
             'payment_method' => 'required|in:cash,card,transfer',
             'notes' => 'nullable|string',
         ]);
@@ -178,18 +195,60 @@ class SaleController extends Controller
                     ], 400);
                 }
 
-                $subtotal = $product->price * $item['quantity'];
+                $unitPrice = $product->price;
+                
+                $variantsInput = $item['variants'] ?? null;
+                if (is_string($variantsInput)) {
+                    try { $variantsInput = json_decode($variantsInput, true); } catch (\Throwable $e) { $variantsInput = null; }
+                }
+
+                // If variants are selected, we MUST check and deduct stock from the pivot table (variants)
+                // And also calculate the correct unit price including deltas
+                if ($variantsInput && is_array($variantsInput)) {
+                    foreach ($variantsInput as $vInfo) {
+                        $unitPrice += ($vInfo['priceDelta'] ?? 0);
+                        
+                        // We need to find the specific value_id. 
+                        $attrValue = \App\Models\AttributeValue::where('name', $vInfo['value'])->first();
+                        if ($attrValue) {
+                            $pivot = DB::table('product_attribute_values')
+                                ->where('product_id', $product->id)
+                                ->where('attribute_value_id', $attrValue->id)
+                                ->first();
+
+                            if ($pivot && $pivot->stock < $item['quantity']) {
+                                throw new \Exception("Stock insuficiente para variante {$vInfo['value']}. Disponible: {$pivot->stock}");
+                            }
+
+                            if ($pivot) {
+                                DB::table('product_attribute_values')
+                                    ->where('id', $pivot->id)
+                                    ->decrement('stock', $item['quantity']);
+                            }
+                        }
+                    }
+                }
+
+                $subtotal = $unitPrice * $item['quantity'];
                 $total += $subtotal;
 
                 $itemsData[] = [
                     'product_id' => $product->id,
                     'quantity' => $item['quantity'],
-                    'unit_price' => $product->price,
+                    'unit_price' => $unitPrice,
                     'subtotal' => $subtotal,
+                    'variants' => $variantsInput,
                 ];
 
-                // Reduce stock
+                // Reduce general stock and track outflows
                 $product->decrement('stock', $item['quantity']);
+                $product->increment('stock_out_total', $item['quantity']);
+                StockMovement::create([
+                    'product_id' => $product->id,
+                    'type' => 'out',
+                    'quantity' => $item['quantity'],
+                    'variants' => $variantsInput,
+                ]);
             }
 
             // Create sale

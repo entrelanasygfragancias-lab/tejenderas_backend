@@ -4,25 +4,18 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class SaleItem extends Model
+class StockMovement extends Model
 {
     protected $fillable = [
-        'sale_id',
         'product_id',
+        'type',
         'quantity',
-        'unit_price',
-        'subtotal',
         'variants',
     ];
 
     protected $casts = [
         'variants' => 'array',
     ];
-
-    public function sale()
-    {
-        return $this->belongsTo(Sale::class);
-    }
 
     public function product()
     {

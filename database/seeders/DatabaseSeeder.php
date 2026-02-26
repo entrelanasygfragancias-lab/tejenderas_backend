@@ -30,5 +30,8 @@ class DatabaseSeeder extends Seeder
             'password' => bcrypt('password'),
             'role' => 'client',
         ]);
+
+        // Default Inventory Data
+        $this->call(DefaultInventorySeeder::class);
     }
 }

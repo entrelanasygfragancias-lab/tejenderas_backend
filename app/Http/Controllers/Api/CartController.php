@@ -23,23 +23,41 @@ class CartController extends Controller
     {
         $request->validate([
             'product_id' => 'required|exists:products,id',
-            'quantity' => 'required|integer|min:1'
+            'quantity' => 'required|integer|min:1',
+            'unit_price' => 'nullable|numeric',
+            'variants' => 'nullable|array'
         ]);
 
         $user = Auth::user();
         $cart = Cart::firstOrCreate(['user_id' => $user->id]);
 
         $product = Product::findOrFail($request->product_id);
+        
+        $unitPrice = $request->unit_price ?? $product->price;
+        $variants = $request->variants;
 
-        $cartItem = $cart->items()->where('product_id', $product->id)->first();
+        // Find existing item with same product and variants
+        // We compare the JSON string of variants
+        $variantsJson = $variants ? json_encode($variants) : null;
+        
+        $cartItem = $cart->items()
+            ->where('product_id', $product->id)
+            ->get()
+            ->filter(function($item) use ($variantsJson) {
+                return json_encode($item->variants) === $variantsJson;
+            })
+            ->first();
 
         if ($cartItem) {
             $cartItem->quantity += $request->quantity;
+            $cartItem->unit_price = $unitPrice;
             $cartItem->save();
         } else {
             $cart->items()->create([
                 'product_id' => $product->id,
-                'quantity' => $request->quantity
+                'quantity' => $request->quantity,
+                'unit_price' => $unitPrice,
+                'variants' => $variants
             ]);
         }
 
