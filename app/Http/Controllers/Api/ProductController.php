@@ -294,7 +294,9 @@ class ProductController extends Controller
      */
     public function check($barcode)
     {
-        $product = Product::where('barcode', $barcode)->first();
+        $product = Product::with(['category', 'subcategory', 'attributes', 'attributeValues.attribute'])
+            ->where('barcode', $barcode)
+            ->first();
 
         if ($product) {
             return response()->json(['exists' => true, 'product' => $product]);
