@@ -8,6 +8,7 @@ use App\Models\StockMovement;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 
 class ProductController extends Controller
@@ -65,7 +66,7 @@ class ProductController extends Controller
         $validated = $this->validateProduct($request);
 
         if ($request->hasFile('image')) {
-            $validated['image'] = $request->file('image')->store('products', 'public');
+            $validated['image'] = Cloudinary::upload($request->file('image')->getRealPath())->getSecurePath();
         }
 
         if ($request->hasFile('images')) {
@@ -109,10 +110,7 @@ class ProductController extends Controller
             DB::beginTransaction();
 
             if ($request->hasFile('image')) {
-                if ($product->image) {
-                    Storage::disk('public')->delete($product->image);
-                }
-                $validated['image'] = $request->file('image')->store('products', 'public');
+                $validated['image'] = Cloudinary::upload($request->file('image')->getRealPath())->getSecurePath();
             }
 
             if ($request->hasFile('images')) {
@@ -168,7 +166,7 @@ class ProductController extends Controller
     {
         $galleryPaths = [];
         foreach ($imageFiles as $imgFile) {
-            $galleryPaths[] = $imgFile->store('products', 'public');
+            $galleryPaths[] = Cloudinary::upload($imgFile->getRealPath())->getSecurePath();
         }
         return $galleryPaths;
     }
@@ -200,7 +198,7 @@ class ProductController extends Controller
                 ];
 
                 if (isset($images[$valueId])) {
-                    $path = $images[$valueId]->store('attribute_values', 'public');
+                    $path = Cloudinary::upload($images[$valueId]->getRealPath())->getSecurePath();
                     $pivotData['image'] = $path;
                 } elseif ($request->input("keep_value_image_{$valueId}")) {
                     $existing = $product->attributeValues()->where('attribute_values.id', $valueId)->first();

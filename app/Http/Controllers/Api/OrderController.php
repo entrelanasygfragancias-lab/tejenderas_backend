@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 use Illuminate\Support\Facades\Storage;
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class OrderController extends Controller
 {
@@ -73,7 +74,7 @@ class OrderController extends Controller
             ]);
 
             if ($request->hasFile('payment_proof')) {
-                $path = $request->file('payment_proof')->store('payment_proofs', 'public');
+                $path = Cloudinary::upload($request->file('payment_proof')->getRealPath())->getSecurePath();
                 $order->payment_proof = $path;
                 $order->save();
 
