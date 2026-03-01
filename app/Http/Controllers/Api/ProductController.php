@@ -65,12 +65,17 @@ class ProductController extends Controller
     {
         $validated = $this->validateProduct($request);
 
-        if ($request->hasFile('image')) {
-            $validated['image'] = Cloudinary::upload($request->file('image')->getRealPath())->getSecurePath();
-        }
+        try {
+            if ($request->hasFile('image')) {
+                $validated['image'] = Cloudinary::upload($request->file('image')->getRealPath())->getSecurePath();
+            }
 
-        if ($request->hasFile('images')) {
-            $validated['images'] = $this->handleMultipleImages($request->file('images'));
+            if ($request->hasFile('images')) {
+                $validated['images'] = $this->handleMultipleImages($request->file('images'));
+            }
+        } catch (\Throwable $e) {
+            \Log::error('Cloudinary upload error: ' . $e->getMessage());
+            return response()->json(['message' => 'Error al subir la imagen a Cloudinary: ' . $e->getMessage()], 500);
         }
 
         try {
@@ -107,8 +112,6 @@ class ProductController extends Controller
         $validated = $this->validateProduct($request, $product->id);
 
         try {
-            DB::beginTransaction();
-
             if ($request->hasFile('image')) {
                 $validated['image'] = Cloudinary::upload($request->file('image')->getRealPath())->getSecurePath();
             }
@@ -116,11 +119,18 @@ class ProductController extends Controller
             if ($request->hasFile('images')) {
                 if ($product->images) {
                     foreach ($product->images as $oldImg) {
-                        Storage::disk('public')->delete($oldImg);
+                        // Optionally handle cloudinary delete here if needed
                     }
                 }
                 $validated['images'] = $this->handleMultipleImages($request->file('images'));
             }
+        } catch (\Throwable $e) {
+            \Log::error('Cloudinary update upload error: ' . $e->getMessage());
+            return response()->json(['message' => 'Error al subir la imagen a Cloudinary en actualización: ' . $e->getMessage()], 500);
+        }
+
+        try {
+            DB::beginTransaction();
 
             $product->update(collect($validated)->except(['attributes', 'attribute_values'])->toArray());
 
@@ -181,20 +191,20 @@ class ProductController extends Controller
             $values = $request->input('attribute_values');
             $syncData = [];
             
-            $priceDeltas = $request->input('attribute_value_price_deltas', []);
-            $basePrices = $request->input('attribute_value_base_prices', []);
-            $markups = $request->input('attribute_value_markups', []);
-            $markupTypes = $request->input('attribute_value_markup_types', []);
-            $valueStocks = $request->input('attribute_value_stocks', []);
-            $images = $request->file('value_images', []);
+            $priceDeltas = $request->input('attribute_value_price_deltas') ?? [];
+            $basePrices = $request->input('attribute_value_base_prices') ?? [];
+            $markups = $request->input('attribute_value_markups') ?? [];
+            $markupTypes = $request->input('attribute_value_markup_types') ?? [];
+            $valueStocks = $request->input('attribute_value_stocks') ?? [];
+            $images = $request->file('value_images') ?? [];
 
             foreach ($values as $valueId) {
                 $pivotData = [
-                    'price_delta' => $priceDeltas[$valueId] ?? 0,
-                    'base_price' => $basePrices[$valueId] ?? 0,
-                    'markup' => $markups[$valueId] ?? 0,
-                    'markup_type' => $markupTypes[$valueId] ?? 'percentage',
-                    'stock' => $valueStocks[$valueId] ?? 0,
+                    'price_delta' => (isset($priceDeltas[$valueId]) ? $priceDeltas[$valueId] : 0),
+                    'base_price' => (isset($basePrices[$valueId]) ? $basePrices[$valueId] : 0),
+                    'markup' => (isset($markups[$valueId]) ? $markups[$valueId] : 0),
+                    'markup_type' => (isset($markupTypes[$valueId]) ? $markupTypes[$valueId] : 'percentage'),
+                    'stock' => (isset($valueStocks[$valueId]) ? $valueStocks[$valueId] : 0),
                 ];
 
                 if (isset($images[$valueId])) {
