@@ -67,9 +67,9 @@ class ProductController extends Controller
 
         try {
             if ($request->hasFile('image') && $request->file('image')) {
-                $result = Cloudinary::upload($request->file('image')->getRealPath());
-                if ($result) {
-                    $validated['image'] = $result->getSecurePath();
+                $path = Storage::disk('cloudinary')->put('products', $request->file('image'));
+                if ($path) {
+                    $validated['image'] = Storage::disk('cloudinary')->url($path);
                 }
             }
 
@@ -116,9 +116,9 @@ class ProductController extends Controller
 
         try {
             if ($request->hasFile('image') && $request->file('image')) {
-                $result = Cloudinary::upload($request->file('image')->getRealPath());
-                if ($result) {
-                    $validated['image'] = $result->getSecurePath();
+                $path = Storage::disk('cloudinary')->put('products', $request->file('image'));
+                if ($path) {
+                    $validated['image'] = Storage::disk('cloudinary')->url($path);
                 }
             }
 
@@ -187,9 +187,9 @@ class ProductController extends Controller
         foreach ($imageFiles as $imgFile) {
             if ($imgFile) {
                 try {
-                    $result = Cloudinary::upload($imgFile->getRealPath());
-                    if ($result) {
-                        $galleryPaths[] = $result->getSecurePath();
+                    $path = Storage::disk('cloudinary')->put('products/gallery', $imgFile);
+                    if ($path) {
+                        $galleryPaths[] = Storage::disk('cloudinary')->url($path);
                     }
                 } catch (\Throwable $e) {
                     \Log::error('Cloudinary gallery upload error: ' . $e->getMessage());
@@ -227,9 +227,9 @@ class ProductController extends Controller
 
                 if (isset($images[$valueId]) && $images[$valueId]) {
                     try {
-                        $result = Cloudinary::upload($images[$valueId]->getRealPath());
-                        if ($result) {
-                            $pivotData['image'] = $result->getSecurePath();
+                        $path = Storage::disk('cloudinary')->put('products/variants', $images[$valueId]);
+                        if ($path) {
+                            $pivotData['image'] = Storage::disk('cloudinary')->url($path);
                         }
                     } catch (\Throwable $e) {
                         \Log::error('Cloudinary variant upload error: ' . $e->getMessage());

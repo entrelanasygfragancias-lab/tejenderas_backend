@@ -74,9 +74,15 @@ class OrderController extends Controller
             ]);
 
             if ($request->hasFile('payment_proof')) {
-                $path = Cloudinary::upload($request->file('payment_proof')->getRealPath())->getSecurePath();
-                $order->payment_proof = $path;
-                $order->save();
+                try {
+                    $path = Storage::disk('cloudinary')->put('orders/payment_proofs', $request->file('payment_proof'));
+                    if ($path) {
+                        $order->payment_proof = Storage::disk('cloudinary')->url($path);
+                        $order->save();
+                    }
+                } catch (\Throwable $e) {
+                    \Log::error('Cloudinary payment proof upload error: ' . $e->getMessage());
+                }
 
                 $adminUsers = User::where('role', 'admin')->get();
                 foreach ($adminUsers as $adminUser) {
