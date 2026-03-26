@@ -13,6 +13,8 @@ class CartItem extends Model
 
     protected $casts = [
         'variants' => 'array',
+        'unit_price' => 'decimal:2',
+        'quantity' => 'integer',
     ];
 
     public function cart()

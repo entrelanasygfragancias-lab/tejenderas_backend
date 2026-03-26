@@ -61,5 +61,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::apiResource('contracts', App\Http\Controllers\Api\ContractController::class);
         Route::post('/contracts/{contract}/payments', [App\Http\Controllers\Api\ContractController::class, 'addPayment']);
         Route::post('/contracts/{contract}/extend', [App\Http\Controllers\Api\ContractController::class, 'extend']);
+        Route::apiResource('contract-payments', App\Http\Controllers\Api\ContractPaymentController::class);
     });
 });

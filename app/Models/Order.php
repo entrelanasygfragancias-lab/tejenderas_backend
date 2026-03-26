@@ -22,6 +22,16 @@ class Order extends Model
         'shipping_date',
     ];
 
+    protected $casts = [
+        'total' => 'decimal:2',
+        'shipping_cost' => 'decimal:2',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+        'shipping_date' => 'datetime',
+    ];
+
+    public $timestamps = true;
+
     public function user()
     {
         return $this->belongsTo(User::class);

@@ -33,7 +33,47 @@ class CartController extends Controller
 
         $product = Product::findOrFail($request->product_id);
         
-        $unitPrice = $request->unit_price ?? $product->price;
+        // Calculate the correct price with multiple fallbacks
+        $unitPrice = $request->unit_price;
+        
+        // If no unit_price provided, calculate from product
+        if (!$unitPrice || $unitPrice == 0) {
+            $unitPrice = $product->price;
+            
+            // If product price is null, 0, or empty, try to calculate from base_price + markup
+            if (!$unitPrice || $unitPrice == 0) {
+                if ($product->base_price && $product->base_price > 0) {
+                    $basePrice = $product->base_price;
+                    $markup = $product->markup ?? 0;
+                    $markupType = $product->markup_type ?? 'percentage';
+                    
+                    if ($markupType === 'percentage') {
+                        $unitPrice = $basePrice * (1 + $markup / 100);
+                    } else {
+                        $unitPrice = $basePrice + $markup;
+                    }
+                    
+                    // Add priceDelta from variants if provided
+                    if (!empty($variants)) {
+                        $priceDelta = 0;
+                        foreach ($variants as $variant) {
+                            if (isset($variant['priceDelta'])) {
+                                $priceDelta += $variant['priceDelta'];
+                            }
+                        }
+                        $unitPrice += $priceDelta;
+                        \Log::info('CartController: Added priceDelta for product ' . $product->id . ': ' . $priceDelta . ', Final price: ' . $unitPrice);
+                    }
+                    
+                    \Log::info('CartController: Calculated price from base_price + markup for product ' . $product->id . ': ' . $unitPrice);
+                } else {
+                    // Last resort: use a default price
+                    $unitPrice = 10000; // Default price of $10,000
+                    \Log::warning('CartController: Product ' . $product->id . ' has no pricing data, using default price: ' . $unitPrice);
+                }
+            }
+        }
+        
         $variants = $request->variants;
 
         // Find existing item with same product and variants

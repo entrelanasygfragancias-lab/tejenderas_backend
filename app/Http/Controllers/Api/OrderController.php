@@ -7,6 +7,7 @@ use App\Models\Cart;
 use App\Models\Order;
 use App\Models\AdminNotification;
 use App\Models\OrderItem;
+use App\Models\StockMovement;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -96,12 +97,50 @@ class OrderController extends Controller
             }
 
             foreach ($cart->items as $item) {
+                // Calculate the correct price with multiple fallbacks
+                $productPrice = $item->product->price;
+                
+                // If price is null, 0, or empty string, try to calculate from base_price + markup
+                if (!$productPrice || $productPrice == 0) {
+                    if ($item->product->base_price && $item->product->base_price > 0) {
+                        $basePrice = $item->product->base_price;
+                        $markup = $item->product->markup ?? 0;
+                        $markupType = $item->product->markup_type ?? 'percentage';
+                        
+                        if ($markupType === 'percentage') {
+                            $productPrice = $basePrice * (1 + $markup / 100);
+                        } else {
+                            $productPrice = $basePrice + $markup;
+                        }
+                        
+                        // Add priceDelta from variants if available
+                        if (!empty($item->variants)) {
+                            $priceDelta = 0;
+                            foreach ($item->variants as $variant) {
+                                if (isset($variant['priceDelta'])) {
+                                    $priceDelta += $variant['priceDelta'];
+                                }
+                            }
+                            $productPrice += $priceDelta;
+                            \Log::info('OrderController: Added priceDelta for product ' . $item->product_id . ': ' . $priceDelta . ', Final price: ' . $productPrice);
+                        }
+                        
+                        \Log::info('Calculated price from base_price + markup for product ' . $item->product_id . ': ' . $productPrice);
+                    } else {
+                        // Last resort: use a default price
+                        $productPrice = 10000; // Default price of $10,000
+                        \Log::warning('Product ' . $item->product_id . ' has no pricing data, using default price: ' . $productPrice);
+                    }
+                }
+                
                 OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $item->product_id,
                     'quantity' => $item->quantity,
-                    'price' => $item->product->price,
+                    'price' => $productPrice,
                 ]);
+                
+                \Log::info('Created OrderItem for product ' . $item->product_id . ' with price: ' . $productPrice);
             }
 
             // Clear cart
@@ -136,5 +175,54 @@ class OrderController extends Controller
         ]);
 
         return response()->json($order->load('user', 'items.product'));
+    }
+
+    /**
+     * Remove the specified order from storage.
+     */
+    public function destroy(Order $order)
+    {
+        try {
+            DB::beginTransaction();
+
+            // For completed orders, restore stock
+            if ($order->status === 'completed') {
+                foreach ($order->items as $item) {
+                    $product = $item->product;
+                    
+                    // Restore stock
+                    $product->increment('stock', $item->quantity);
+                    $product->decrement('stock_out_total', $item->quantity);
+
+                    // Record stock movement
+                    StockMovement::create([
+                        'product_id' => $product->id,
+                        'type' => 'in',
+                        'quantity' => $item->quantity,
+                        'notes' => 'Devolución por eliminación de pedido #' . $order->id,
+                    ]);
+                }
+            }
+
+            // Delete order items first (foreign key constraint)
+            $order->items()->delete();
+
+            // Delete the order
+            $order->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'message' => 'Pedido eliminado exitosamente'
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Order deletion failed: ' . $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine());
+            return response()->json([
+                'message' => 'Error al eliminar el pedido',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
     }
 }

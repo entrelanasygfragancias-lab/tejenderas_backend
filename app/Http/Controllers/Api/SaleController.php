@@ -319,4 +319,88 @@ class SaleController extends Controller
     {
         return response()->json($sale->load(['user', 'items.product']));
     }
+
+    /**
+     * Remove the specified sale from storage.
+     */
+    public function destroy(Sale $sale)
+    {
+        \Log::info('Intentando eliminar venta ID: ' . $sale->id);
+        
+        try {
+            DB::beginTransaction();
+
+            // Restore stock for each item in the sale
+            foreach ($sale->items as $item) {
+                \Log::info('Procesando item: ' . $item->id . ' - Producto: ' . $item->product_id . ' - Cantidad: ' . $item->quantity);
+                
+                $product = $item->product;
+                
+                // Restore general stock
+                $product->increment('stock', $item->quantity);
+                $product->decrement('stock_out_total', $item->quantity);
+
+                // Restore variant stock if variants exist
+                $variantsInput = $item->variants;
+                if ($variantsInput && is_array($variantsInput)) {
+                    foreach ($variantsInput as $vInfo) {
+                        $attrValue = \App\Models\AttributeValue::where('name', $vInfo['value'])
+                            ->whereHas('attribute', function($q) use ($vInfo) {
+                                $q->where('name', $vInfo['option']);
+                            })
+                            ->first();
+
+                        if ($attrValue) {
+                            $pivot = DB::table('product_attribute_values')
+                                ->where('product_id', $product->id)
+                                ->where('attribute_value_id', $attrValue->id)
+                                ->first();
+
+                            if ($pivot) {
+                                DB::table('product_attribute_values')
+                                    ->where('id', $pivot->id)
+                                    ->update([
+                                        'stock' => DB::raw("stock + " . $item->quantity),
+                                        'stock_out_total' => DB::raw("stock_out_total - " . $item->quantity)
+                                    ]);
+                            }
+                        }
+                    }
+                }
+
+                // Record stock movement
+                StockMovement::create([
+                    'product_id' => $product->id,
+                    'type' => 'in',
+                    'quantity' => $item->quantity,
+                    'variants' => $variantsInput,
+                    'notes' => 'Devolución por eliminación de venta #' . $sale->id,
+                ]);
+            }
+
+            // Delete sale items first (foreign key constraint)
+            \Log::info('Eliminando items de venta ' . $sale->id);
+            $sale->items()->delete();
+
+            // Delete the sale
+            \Log::info('Eliminando venta ' . $sale->id);
+            $sale->delete();
+
+            DB::commit();
+
+            \Log::info('Venta eliminada exitosamente: ' . $sale->id);
+
+            return response()->json([
+                'message' => 'Venta eliminada exitosamente'
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Sale deletion failed: ' . $e->getMessage() . ' at ' . $e->getFile() . ':' . $e->getLine());
+            return response()->json([
+                'message' => 'Error al eliminar la venta',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }
